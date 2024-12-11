@@ -6,7 +6,7 @@ OBJS = $(SRCS:.c=.o)
 
 
 # Please, check that -I path is correct
-CPPFLAGS += -O0 -g -I. -I$(HOME)/intel/oneapi/vtune/latest/sdk/include/
+CPPFLAGS += -O0 -g -I. -I$(HOME)/intel/oneapi/vtune/latest/sdk/include/ -fsycl
 #LDFLAGS += -D VERBOSE -D VERBOSE_DBG -D BLOCK_DBG=-1
 
 
