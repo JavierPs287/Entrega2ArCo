@@ -11,7 +11,7 @@ Recuerda que en esta práctica **no realizaremos la paralelización a nivel de b
 Busca cómo crear la cola y pasa como parámetro a la cola el selector por defecto. Recuerda que la cola se tiene que crear antes de cualquier tipo de computo. Es importante que entiendas que las colas se crean una única vez y por lo tanto se deberá ir compartiendo entre los diferentes métodos para que todos puedan mandar trabajos a ella. Crear una cola antes de cada operación tendría una sobrecarga muy alta y limitaría el rendimiento del programa final.
 
 ## ¿Para que sirve la cola?
-La cola nos permite manejar el flujo de trabajo y coordinar los distintos dispositivos hardware utilizados, por lo que a la vez que maneja este flujo se encarga de la sincronización de las tareas
+**Contesta aquí**
 
 ## Adapta los tipos de datos
 Aunque este paso es opcional ya que DPC puede trabajar con tipos de datos de C, resulta interesante migrar las estructuras de datos básicas de C a C++. Por ejemplo, en lugar de usar un int [] en std::array<int, ...>. Trata de modificar paso a paso las estructuras que consideres más importantes y comprueba que el programa sigue funcionando. Hasta que no te hayas asegurado que el programa continua mostrando los resultados correctos no continues.
