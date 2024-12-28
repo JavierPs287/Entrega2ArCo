@@ -10,6 +10,7 @@ using namespace sycl;
 using namespace std;
 #endif
 
+queue q{default_selector_v};
 
 void LBL_FAD_Stage1(int blockIndex, unsigned short *ImgRef,
 		    unsigned int &n_indexes, unsigned short *bg_indexes,
@@ -161,64 +162,50 @@ void LBL_FAD_Stage3_4(int blockIndex, unsigned short *ImgRef,
 
 
 
-
 // ---------- HyperLCA Operators ---------- //
 
 
 // Calculating the average pixel of the frame (centroid pixel)
-void averagePixel(unsigned short *ImgRef, int *centroid, int blockSize) {
-  const int bands = BANDS;
+void averagePixel(unsigned short* ImgRef, int* centroid, int blockSize) {
+    buffer<unsigned short, 1> imgRefBuf(ImgRef, range<1>(blockSize * BANDS));
+    buffer<int, 1> centroidBuf(centroid, range<1>(BANDS));
 
-  // Creamos un accesor de acceso para el arreglo ImgRef
-  buffer<unsigned short, 1> imgRefBuf(ImgRef, range<1>(blockSize * bands));
-  buffer<int, 1> centroidBuf(centroid, range<1>(bands));
+    q.submit([&](handler& h) {
+        auto imgRef = imgRefBuf.get_access<access::mode::read>(h);
+        auto centroid = centroidBuf.get_access<access::mode::write>(h);
 
-  queue q{default_selector_v};
-
-  q.submit([&](handler &h) {
-    auto imgRefAcc = imgRefBuf.get_access<access::mode::read>(h);
-    auto centroidAcc = centroidBuf.get_access<access::mode::write>(h);
-
-    h.parallel_for<class AveragePixelKernel>(range<1>(bands), [=](id<1> bandIdx) {
-      int band = bandIdx[0];
-      int sum = 0;
-
-      // Calcular el promedio de cada banda en paralelo
-      for (int pixel = 0; pixel < blockSize; pixel++) {
-        sum += imgRefAcc[pixel * bands + band];
-      }
-
-      centroidAcc[band] = sum / blockSize;
+        h.parallel_for(range<1>(BANDS), [=](id<1> band) {
+            int sum = 0;
+            for (int pixel = 0; pixel < blockSize; ++pixel) {
+                sum += imgRef[pixel * BANDS + band];
+            }
+            centroid[band] = sum / blockSize;
+        });
     });
-  });
-
-  q.wait();
 }
 
 
 
-// Subtracting the centroid pixel and create the Auxiliary Img
-void duplicateAndCentralizeImg(unsigned short *ImgRef, short *Img, int *centroid, int blockSize) {
-    buffer<unsigned short, 2> imgRefBuf(ImgRef, range<2>(blockSize, BANDS));
-    buffer<short, 2> imgBuf(Img, range<2>(blockSize, BANDS));
-    buffer<int, 1> centroidBuf(centroid, range<1>(BANDS));
 
-    queue q{default_selector_v};
+// Subtracting the centroid pixel and create the Auxiliary Img
+void duplicateAndCentralizeImg(unsigned short* ImgRef, short* Img, int* centroid, int blockSize) {
+    buffer<unsigned short, 1> imgRefBuf(ImgRef, range<1>(blockSize * BANDS));
+    buffer<short, 1> imgBuf(Img, range<1>(blockSize * BANDS));
+    buffer<int, 1> centroidBuf(centroid, range<1>(BANDS));
 
     q.submit([&](handler& h) {
         auto imgRef = imgRefBuf.get_access<access::mode::read>(h);
         auto img = imgBuf.get_access<access::mode::write>(h);
         auto centroid = centroidBuf.get_access<access::mode::read>(h);
 
-        h.parallel_for(range<2>(blockSize, BANDS), [=](id<2> idx) {
-            int pixel = idx[0];
-            int band = idx[1];
+        h.parallel_for(range<1>(blockSize * BANDS), [=](id<1> idx) {
+            int pixel = idx[0] / BANDS;
+            int band = idx[0] % BANDS;
             img[idx] = ((short)imgRef[idx] - (short)centroid[band]) << 2;
         });
     });
-    
-    q.wait();
 }
+
 
 
 
@@ -255,19 +242,31 @@ void brightness(short *Img, int &maxIndex, long long &maxBrightness, unsigned ch
 
 
 
+
+
 // Calculating "qVector" and "uVector"
-void quVectors(short *Img, int &maxIndex, long long &maxBrightness, int *qVector, int *uVector)
-{
+void quVectors(short* Img, int &maxIndex, long long &maxBrightness, int* qVector, int* uVector) {
+    buffer<short, 1> imgBuf(Img, range<1>(maxIndex * BANDS + BANDS)); // Aseguramos que Img tiene espacio suficiente
+    buffer<int, 1> qVectorBuf(qVector, range<1>(BANDS));
+    buffer<int, 1> uVectorBuf(uVector, range<1>(BANDS));
 
-  for(int band=0; band<BANDS; band++){
-    // qVector
-    qVector[band] = Img[maxIndex*BANDS + band];
+    q.submit([&](handler& h) {
+        auto img = imgBuf.get_access<access::mode::read>(h);
+        auto qVec = qVectorBuf.get_access<access::mode::write>(h);
+        auto uVec = uVectorBuf.get_access<access::mode::write>(h);
 
-    // uVector
-    long long ImgValueLong = Img[maxIndex*BANDS + band];
-    ImgValueLong = ImgValueLong << 28; // -1 Considering the sign
-    uVector[band] = ImgValueLong / (maxBrightness >> 16);
-  }
+        h.parallel_for(range<1>(BANDS), [=](id<1> band) {
+            // qVector
+            qVec[band] = img[maxIndex * BANDS + band];
+
+            // uVector
+            long long ImgValueLong = img[maxIndex * BANDS + band];
+            ImgValueLong = ImgValueLong << 28;
+            uVec[band] = ImgValueLong / (maxBrightness >> 16);
+        });
+    });
+
+    q.wait();
 }
 
 
@@ -275,29 +274,26 @@ void quVectors(short *Img, int &maxIndex, long long &maxBrightness, int *qVector
 
 
 // Calculating the projection of "Img" into "uVector"
-void projectingImg(short *Img, int *projection, int *uVector, int blockSize) {
-    buffer<short, 1> imgBuffer(Img, range<1>(blockSize * BANDS));
-    buffer<int, 1> projectionBuffer(projection, range<1>(blockSize));
-    buffer<int, 1> uVectorBuffer(uVector, range<1>(BANDS));
+void projectingImg(short* Img, int* projection, int* uVector, int blockSize) {
+    buffer<short, 1> imgBuf(Img, range<1>(blockSize * BANDS));
+    buffer<int, 1> projectionBuf(projection, range<1>(blockSize));
+    buffer<int, 1> uVectorBuf(uVector, range<1>(BANDS));
 
-    queue q{default_selector_v};
-
-    q.submit([&](handler &h) {
-        auto img = imgBuffer.get_access<access::mode::read>(h);
-        auto proj = projectionBuffer.get_access<access::mode::write>(h);
-        auto uV = uVectorBuffer.get_access<access::mode::read>(h);
+    q.submit([&](handler& h) {
+        auto img = imgBuf.get_access<access::mode::read>(h);
+        auto proj = projectionBuf.get_access<access::mode::write>(h);
+        auto uV = uVectorBuf.get_access<access::mode::read>(h);
 
         h.parallel_for(range<1>(blockSize), [=](id<1> pixel) {
             long long projectionValue = 0;
             for (int band = 0; band < BANDS; ++band) {
-                projectionValue += uV[band] * img[pixel * BANDS + band];
+                projectionValue += uV[band] * img[pixel[0] * BANDS + band];
             }
             proj[pixel] = projectionValue >> 4;
         });
     });
-
-    q.wait();
 }
+
 
 
 
@@ -331,7 +327,7 @@ void subtractingInformation(short *Img, int *projection, int *qVector, int block
 
 
 
-void stop_condition(long long &tau, unsigned char &numQU, unsigned short maxIndex, long long maxBrightness, long long *brightnessIter1, bool &stop, unsigned short &out_index, const int ALPHA) {
+void stop_condition(long long& tau, unsigned char& numQU, unsigned short maxIndex, long long maxBrightness, long long* brightnessIter1, bool& stop, unsigned short& out_index, int ALPHA) {
     buffer<long long, 1> brightnessBuf(brightnessIter1, range<1>(BLOCK_SIZE));
     buffer<bool, 1> stopBuf(&stop, range<1>(1));
     buffer<unsigned short, 1> outIndexBuf(&out_index, range<1>(1));
@@ -341,7 +337,7 @@ void stop_condition(long long &tau, unsigned char &numQU, unsigned short maxInde
 
     queue q{default_selector_v};
 
-    q.submit([&](handler &h) {
+    q.submit([&](handler& h) {
         auto brightness = brightnessBuf.get_access<access::mode::read>(h);
         auto stopAcc = stopBuf.get_access<access::mode::write>(h);
         auto outIndex = outIndexBuf.get_access<access::mode::write>(h);
@@ -362,6 +358,8 @@ void stop_condition(long long &tau, unsigned char &numQU, unsigned short maxInde
     });
     q.wait();
 }
+
+
 
 
 
