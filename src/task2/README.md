@@ -4,7 +4,8 @@ Comprueba que los resultados siguen siendo correctos. Importante, prueba a ejecu
 
 
 ## ¿Mejora el código paralelo con respecto al código secuencial?
-**Contesta aquí, muestra los resultados y escribe tus conclusiones**
+**El rendimiento de la aplicación mejora notablemente, podemos ver como el tiempo de ejecuccion sin apenas paralelizar metodos supera los 500 segundos, pero sin embargo al paralelizar los metodos obtenemos un resultado de 101 segundos como pareciamos en la imagen. El único metodo que no paralelizamos es el metodo de brightness, debido a que si lo hacemos, el programa nunca se terminará de ejecutar.**
+![image](https://github.com/user-attachments/assets/f2714c8c-2d8a-4811-a6b8-72dadcd9d185)
 
 ----
 
